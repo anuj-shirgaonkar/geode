@@ -14,6 +14,10 @@
  */
 package org.apache.geode.management.internal.cli.commands;
 
+import static java.lang.ProcessBuilder.Redirect.from;
+import static java.lang.ProcessBuilder.Redirect.to;
+import static org.apache.geode.internal.util.IOUtils.close;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -349,8 +353,9 @@ public class StartServerCommand extends OfflineGfshCommand {
     Process serverProcess =
         getProcess(serverLauncher.getWorkingDirectory(), serverCommandLine);
 
-    serverProcess.getInputStream().close();
-    serverProcess.getOutputStream().close();
+    // These should be redirected to /dev/null but close to be safe.
+    close(serverProcess.getInputStream());
+    close(serverProcess.getOutputStream());
 
     // fix TRAC bug #51967 by using NON_BLOCKING on Windows
     final ProcessStreamReader.ReadingMode readingMode = SystemUtils.isWindows()
@@ -413,8 +418,12 @@ public class StartServerCommand extends OfflineGfshCommand {
       } while (!(registeredServerSignalListener && serverSignalListener.isSignaled())
           && serverState.isStartingOrNotResponding());
     } finally {
-      stderrReader.stopAsync(StartMemberUtils.PROCESS_STREAM_READER_ASYNC_STOP_TIMEOUT_MILLIS);
       // stop will close ErrorStream
+      stderrReader.stopAsync(StartMemberUtils.PROCESS_STREAM_READER_ASYNC_STOP_TIMEOUT_MILLIS);
+
+      // the readers doesn't seem to close so just in case we close here.
+      close(serverProcess.getErrorStream());
+
       getGfsh().getSignalHandler().unregisterListener(serverSignalListener);
     }
 
@@ -431,8 +440,13 @@ public class StartServerCommand extends OfflineGfshCommand {
     }
   }
 
+  static final File DEV_NULL = new File(System.getProperty("os.name")
+      .startsWith("Windows") ? "NUL" : "/dev/null");
+
   Process getProcess(String workingDir, String[] serverCommandLine) throws IOException {
     return new ProcessBuilder(serverCommandLine)
+        .redirectInput(from(DEV_NULL))
+        .redirectOutput(to(DEV_NULL))
         .directory(new File(workingDir)).start();
   }
 

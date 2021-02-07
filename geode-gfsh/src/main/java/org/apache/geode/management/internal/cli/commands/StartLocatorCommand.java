@@ -15,6 +15,10 @@
 
 package org.apache.geode.management.internal.cli.commands;
 
+import static java.lang.ProcessBuilder.Redirect.from;
+import static java.lang.ProcessBuilder.Redirect.to;
+import static org.apache.geode.internal.util.IOUtils.close;
+
 import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
@@ -221,8 +225,9 @@ public class StartLocatorCommand extends OfflineGfshCommand {
     final Process locatorProcess =
         getProcess(locatorLauncher.getWorkingDirectory(), locatorCommandLine);
 
-    locatorProcess.getInputStream().close();
-    locatorProcess.getOutputStream().close();
+    // These should be redirected to /dev/null but close to be safe.
+    close(locatorProcess.getInputStream());
+    close(locatorProcess.getOutputStream());
 
     // fix TRAC bug #51967 by using NON_BLOCKING on Windows
     final ProcessStreamReader.ReadingMode readingMode = SystemUtils.isWindows()
@@ -287,6 +292,9 @@ public class StartLocatorCommand extends OfflineGfshCommand {
       // stop will close
       stderrReader.stopAsync(StartMemberUtils.PROCESS_STREAM_READER_ASYNC_STOP_TIMEOUT_MILLIS);
 
+      // the readers doesn't seem to close so just in case we close here.
+      close(locatorProcess.getErrorStream());
+
       // ErrorStream
       getGfsh().getSignalHandler().unregisterListener(locatorSignalListener);
     }
@@ -346,10 +354,16 @@ public class StartLocatorCommand extends OfflineGfshCommand {
     return result;
   }
 
+  static final File DEV_NULL = new File(System.getProperty("os.name")
+      .startsWith("Windows") ? "NUL" : "/dev/null");
+
   Process getProcess(String workingDir, String[] locatorCommandLine)
       throws IOException {
     return new ProcessBuilder(locatorCommandLine)
-        .directory(new File(workingDir)).start();
+        .directory(new File(workingDir))
+        .redirectInput(from(DEV_NULL))
+        .redirectOutput(to(DEV_NULL))
+        .start();
   }
 
   // TODO should we connect implicitly when in non-interactive, headless mode (e.g. gfsh -e "start
